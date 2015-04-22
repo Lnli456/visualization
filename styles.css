@@ -1,0 +1,95 @@
+body { 
+    margin:35px;
+    font-family: "fira-sans-2","Open Sans";
+    font-weight: 300;
+    font-style: normal;
+    font-size: 20px;
+    height:100%;
+    margin: 30 0 0 0px;
+    min-width: 1060px;
+
+} 
+
+#project_descript{
+
+    text-align: center;
+    margin: 0 125 20px;
+    
+    
+}
+svg {margin-left:auto; margin-right: auto; display:block;}
+
+#container {
+	display:inline-block;
+}
+
+h1, h2{
+    text-align: center;
+    font-weight: 500;
+    margin: 50 0 30 0 px;
+
+}
+
+.arc path {
+  stroke: #fff;
+}
+
+.arc2 path {
+  stroke: #fff;
+}
+
+pieChartSVG{margin-left:auto; margin-right: auto; display:block;}
+
+#chart{
+
+    margin:0 auto;   
+    width:1200px;    
+   /*have to give div width to center inner divs*/
+}
+
+
+#uniChart{
+    width: 600px;
+    height:600px;
+    float: left;
+
+    margin:125 50px;
+    display:inline-block;
+}
+
+#universityInfo{
+    text-align: center;
+    width: 400px;
+    height:550px;
+    
+    margin:0 50px;
+    float: right;
+   
+    display:inline-block;
+    
+}
+#eat_tile{
+    list-style-type: none;
+     display: inline-block;
+}
+
+    
+a img{
+    
+    margin: 5px;
+    width:105px;
+    height: 100px
+    
+}
+
+img{
+    opacity: 0.5;
+    filter: alpha(opacity=50);
+}
+
+img:hover{
+    opacity: 1;
+    filter: alpha(opacity=1);
+    
+}
+   

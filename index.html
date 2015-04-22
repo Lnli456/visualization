@@ -1,0 +1,486 @@
+<html>
+<head>
+<script src="//use.typekit.net/brg4peb.js"></script>
+<script>try{Typekit.load();}catch(e){}</script>
+	<link href='http://fonts.googleapis.com/css?family=Open+Sans' rel='stylesheet' type='text/css'> 
+<!-- Load the d3 library. -->
+<script src="http://d3js.org/d3.v3.min.js" charset="utf-8"></script>
+<script src="http://d3js.org/topojson.v1.min.js"></script>
+<link rel="stylesheet" type="text/css" href="styles.css">
+
+
+</head>
+<body>
+
+<h1>Yelp Data Analysis on University Dining</h1>
+    <p id="project_descript">Using Yelp's enormous database, this visualization displays the location of select universities and their local eateries. By selecting the univerisity on the map, a breakdown of cuisines and their popularity will is diagrammed.  </p>
+
+<!-- The SVG element will go in here -->
+<div id="map"></div>
+<div id="chart">
+	<div id ="uniChart"></div>
+	<div  id = "universityInfo"> </div>
+</div>
+<script>
+
+var width = 960,
+    height = 600;
+
+var projection = d3.geo.albersUsa().scale([1200]).translate([width/2, 300]);;
+
+var path = d3.geo.path().projection(projection);
+	
+var counties, states;
+
+var businesses;
+
+var universities;
+
+var circles;
+
+var pieChartCategories = ["American", "Mexican", "Chinese", "Japanese", "Indian", "Thai", 
+	"Middle Eastern", "Korean", "Greek", "Vietnamese"];
+
+/* Returns whether this business is a restaurant based on the categories of it */
+function isRestaurant(business) {
+	return business.categories.indexOf("Restaurants") != -1;
+}
+
+/* Returns the "merged" category name of this category so that certain category names are treated as equivalent */
+function mergeCategoryName(category) {
+	if (category === "American (Traditional)" || category === "American (New)")
+		return "American";
+	else if (category === "Japanese" || category === "Sushi Bars")
+		return "Japanese";
+	return category;
+}
+
+// keep track of our selected category
+var selectedCategory = "";
+// keep track of our selected rating
+var selectedRating = 5;
+
+/* Precondition: if category === "", then display info for all categories */
+function displayCategoryInfo(uni, category, stars) {
+	// update div for uni info
+	var info = document.getElementById("universityInfo");
+	info.innerHTML = "<h2>" + uni.university + "</h2>";
+	// no category selected, show data for all
+	if (category === "") {
+
+		var restaurantsWithStars = uni.restaurants.filter(function (restaurant) {
+			for (var ii = 0; ii < restaurant.categories.length; ii++) {
+				if (Math.ceil(restaurant.stars) === stars) {
+					return true;
+				}
+			}
+				return false;
+		});
+        
+  	var sorted = restaurantsWithStars.sort(function (a, b) {
+      // break ties with reviewcount
+			if (a.stars === b.stars) {
+					return a.review_count - b.review_count;
+			}
+			return a.stars - b.stars;
+    });
+
+    // need i>=0 in case there are fewer than 16
+		for (var i = restaurantsWithStars.length - 1; i >= 0 && i >= restaurantsWithStars.length - 16; i--) {
+			var restaurant = sorted[i];
+      info.innerHTML+="<a href="+restaurant.url+"><img src="+restaurant.photo_url+"></a>";
+		}
+	}
+	// category selected
+	else {
+		selectedCategory = category;
+		info.innerHTML += "<p> Category: " + category + "</p>";
+		var categoryAggregateRating = 0;
+		var restaurantsWithCategory = uni.restaurants.filter(function (restaurant) {
+				var foundCategory = false;
+				for (var ii = 0; ii < restaurant.categories.length; ii++) {
+					if (mergeCategoryName(restaurant.categories[ii]) === category) {
+						foundCategory = true;
+						categoryAggregateRating += restaurant.stars;
+					}
+				}
+				return foundCategory;
+		});
+		info.innerHTML += "<p> Number of restaurants with selected category: " + restaurantsWithCategory.length + "</p>";
+		info.innerHTML += "<p> Average rating for selected category: " + categoryAggregateRating / restaurantsWithCategory.length + "</p>";
+
+		var restaurantsWithCategoryAndStars = uni.restaurants.filter(function (restaurant) {
+				var foundCategory = false;
+				for (var ii = 0; ii < restaurant.categories.length; ii++) {
+					if (mergeCategoryName(restaurant.categories[ii]) === category &&
+							Math.ceil(restaurant.stars) === stars) {
+						foundCategory = true;
+					}
+				}
+				return foundCategory;
+		});
+		info.innerHTML += "<p> Number of restaurants with selected category and " + stars + " stars: " + restaurantsWithCategoryAndStars.length + "</p>";
+
+		// display top 5 restaurants for this category
+		var sorted = restaurantsWithCategoryAndStars.sort(function (a, b) {
+			// break ties with reviewcount
+			if (a.stars === b.stars) {
+					return a.review_count - b.review_count;
+			}
+			return a.stars - b.stars;
+		});
+
+		var top5Info = "";
+		// need i>=0 in case there are fewer than 5 
+		for (var i = restaurantsWithCategoryAndStars.length - 1; i >= 0 && i >= restaurantsWithCategoryAndStars.length - 5; i--) {
+			var restaurant = sorted[i];
+			top5Info += "<div class='restaurantInfo'> <a href='" + restaurant.url + "'>"+ restaurant.name + "</a></p></div>";
+		}
+		var numberOfRestaurants = Math.min(restaurantsWithCategoryAndStars.length, 5);
+
+		// grammar stuff
+		var text1, text2;
+		if (numberOfRestaurants > 1){
+			text1 = numberOfRestaurants;
+			text2 = "restaurants with selected category and rating: ";
+		}
+		else {
+			text1 = "";
+			text2 = "restaurant with category and selected rating: ";
+		}
+		if (numberOfRestaurants != 0)
+			info.innerHTML += "<p> Top " + text1 + " " + category + " " + text2 + "" + top5Info + "</p>";
+	}
+	
+}
+
+var colors = ["#001f3f","#0074D9","#39CCCC","#3D9970","#2ECC40","#01FF70","#FFDC00", "#FF851B","#FF4136","#85144b","#B10DC9"];
+var starsColors = d3.scale.linear().domain([0, 3, 5]).range(["#FF0000", "#FFCC00", "#00FF00"]);
+
+/* 
+  Breaks a category up into an array with 5 different objects for stars 1 - 5
+*/
+function subDivideCategory(categoryInfo, uni) {
+	var divisions = new Array();
+	categoryInfo.forEach(function (category) {
+		var subDivisions = new Array();
+		for (var i = 1; i <= 5; i++) {
+			subDivisions.push({count: 0, rating: i, name: category.name});
+		}
+		uni.restaurants.forEach(function (restaurant) {
+			// loop through categories
+			for (var ii = 0; ii < restaurant.categories.length; ii++) {
+				if (mergeCategoryName(restaurant.categories[ii]) === category.name) {
+						// .5 and 1 are merged, 1.5 and 2, etc 
+						var rating = Math.ceil(restaurant.stars);
+						// index is rating - 1
+						subDivisions[rating-1].count++;
+				}
+			}
+		});
+		divisions = divisions.concat(subDivisions);
+	});
+	return divisions;
+}
+
+/*
+   Returns an array with elements for ratings 1 - 5 and the # of restaurants
+   with this rating for a given university
+ */
+function getRatingsCounts(uni) {
+	var ratingsCounts = new Array();
+	for (var i = 1; i <= 5; i++) {
+		ratingsCounts.push({rating: i, count: 0});
+	}
+	uni.restaurants.forEach(function (restaurant) {
+		// .5 and 1 are merged, 1.5 and 2, etc 
+		var rating = Math.ceil(restaurant.stars);
+		// index is rating - 1
+		ratingsCounts[rating-1].count++;
+	});
+	return ratingsCounts;
+}
+
+var chartWidth = 600,
+		chartHeight = 600,
+		outerRadius = 300,
+		radius = 200,
+		innerRadius = 50;
+
+var pieChartSVG;
+
+/* 
+  Generates the outer ratings ring of the pie chart
+ */
+function generateOuterRing(dataToShow, university) {
+	// clear the last graph
+	pieChartSVG.selectAll(".arc2").remove();
+	// outer chart for stars
+	var arc2 = d3.svg.arc()
+    .outerRadius(outerRadius)
+    .innerRadius(radius);
+
+	var pie2 = d3.layout.pie()
+    .sort(null)
+    .value(function(d) { return d.count; });
+
+  var g2 = pieChartSVG.selectAll(".arc2")
+  		.data(pie2(dataToShow))
+  	.enter().append("g")
+  		.attr("class", "arc2");
+
+    g2.append("path")
+      .attr("d", arc2)
+      .on("mouseover", function (d) {
+			  g2.append("text")
+			  	.attr("transform", "translate(" + arc2.centroid(d) + ")")
+			    .attr("dy", ".35em")
+			    .attr("class", "ratingText")
+			    .style("text-anchor", "middle")
+		 	    .style("pointer-events", "none")
+			    // set any text here
+			    .text( d.data.count > 0 ? "" + d.data.rating : "");
+      })
+      .on("mouseout", function(d) {
+      	pieChartSVG.selectAll(".ratingText").remove();
+      })
+  		.on("click",  function (d) { 
+  			selectedRating = d.data.rating;
+  			displayCategoryInfo(university, selectedCategory, selectedRating);
+  		})
+      .style("fill", function (d) {
+      	return starsColors(d.data.rating);
+      })
+      .style("opacity", .5);
+
+
+}
+
+/* 
+  Generates and draws the inner pie chart given a university 
+*/
+function generatePieChart(university) {
+
+	// clear the last graph
+	d3.select("#uniChart").html("");
+	pieChartSVG = d3.select("#uniChart").append("svg")
+		.attr("width", chartWidth)
+	  .attr("height", chartHeight)
+	  .append("g")
+    	.attr("transform", "translate(" + chartWidth / 2 + "," + chartHeight / 2 + ")");
+	// code based off of http://bl.ocks.org/mbostock/3887235
+  var arc = d3.svg.arc()
+    .outerRadius(radius)
+    .innerRadius(innerRadius);
+
+	var pie = d3.layout.pie()
+    .sort(null)
+    .value(function(d) { return d.count; });
+
+  var g = pieChartSVG.selectAll(".arc")
+  		.data(pie(university.categoryInfo))
+  	.enter().append("g")
+  		.attr("class", "arc");
+
+    g.append("path")
+      .attr("d", arc)
+      .style("pointer-events", "all")
+      .on("mouseover", function (d) {
+      	g.append("text")
+      		.attr("transform", "translate(" + arc.centroid(d) + ")")
+	 		    .attr("dy", ".35em")
+	  		  .attr("class", "categoryText")
+	 		    .style("text-anchor", "middle")
+	 		    .style("pointer-events", "none")
+	  		  // set any text here
+	   		  .text(d.data.name);
+      })
+      .on("mouseout", function(d) {
+      	pieChartSVG.selectAll(".categoryText").remove();
+      })
+  		.on("click",  function (d) { 
+  			selectedCategory = d.data.name;
+  			displayCategoryInfo(university, selectedCategory, selectedRating);
+  			var data = subDivideCategory(university.categoryInfo, university);
+  			data = data.filter(function (x) {
+  				return x.name === d.data.name;
+  			});
+  			generateOuterRing(data, university);
+  		})
+      .style("fill", function (d) {
+      	// make sure color is same for category regardless of university
+      	return colors[pieChartCategories.indexOf(d.data.name)];
+      })
+        .style("opacity", .5);
+
+    pieChartSVG.append("circle")
+  		.attr("r", innerRadius)
+  		.style("fill", "#00f")
+  		.on("click", function () {
+  			// return a "null category"
+  			selectedCategory = "";
+  			// filter by stars and display this info
+  			generateOuterRing(getRatingsCounts(university), university);
+  			displayCategoryInfo(university, "", selectedRating);
+  		});
+
+}
+
+
+d3.json("us.json", function(error, shapes) {
+	// These functions give us long,lat coordinates
+	counties = topojson.feature(shapes, shapes.objects.counties).features;
+	states = topojson.feature(shapes, shapes.objects.states).features;
+
+	d3.json("universityLocations.json", function (error, universityLocs) {
+		universities = universityLocs;
+		universities.forEach(function (uni) {
+			uni.restaurants = [];
+			uni.categoryInfo = new Array();
+			uni.children = new Array();
+		});
+
+		d3.json("business_data.json", function (error, rows) {
+			businesses = rows;
+
+			// populate universities array
+			businesses.forEach(function (business) {
+				if (!isRestaurant(business)) 
+					return;
+
+				business.schools.forEach(function (schoolName) {
+					for (var i = 0; i < universities.length; i++) {
+						if (universities[i].university === schoolName) {
+							// if business near school, update categoryInfo for school
+							business.categories.forEach(function (category) {
+								// simplify category names
+								category = mergeCategoryName(category);
+								// we do not care about this category, it will not be included in the pie chart
+								if (pieChartCategories.indexOf(category) === -1)
+									return;
+								var universityCategories = universities[i].categoryInfo;
+								var found = false;
+								for (var j = 0; j < universityCategories.length; j++) {
+									if(universityCategories[j].name == category) {
+										universityCategories[j].count++;
+										found = true;
+									}
+								}
+								if (!found) {
+									universityCategories.push({name: category, count: 1});
+								}
+							});
+							universities[i].restaurants.push(business);
+						}
+					}
+				});
+			});
+
+
+			var svg = d3.select("#map").append("svg")
+		    .attr("width", width)
+		    .attr("height", height);
+			
+			// Create <path> elements for each county.
+			var countyPaths = svg.append("g");
+			countyPaths.selectAll("path").data(counties).enter()
+			.append("path").attr("d", path)
+			.style("fill", "none")
+			.style("stroke", "#e6e6e6");
+		
+			// Add state borders to help us recognize metro areas
+			var statePaths = svg.append("g");
+			statePaths.selectAll("path").data(states).enter()
+			.append("path").attr("d", path)
+			.style("fill", "none")
+			.style("stroke", "#ccc");
+
+			var circles = svg.selectAll("circle")
+				.data(universities)
+				.enter()
+				.append("circle");
+
+			var maxRestaurants = 0;
+			universities.forEach(function (uni) {
+				maxRestaurants = Math.max(maxRestaurants, uni.restaurants.length);
+				// calculate average rating
+				// should we weight it by review count?
+				var aggregateRating = 0;
+				uni.restaurants.forEach(function (restaurant) {
+					aggregateRating += restaurant.stars;
+				});
+				uni.averageRating = aggregateRating / uni.restaurants.length;
+			});
+
+			//scale for circle sizes
+			var rScale = d3.scale.sqrt()
+				.domain([0, maxRestaurants])
+				.range([0, 15]);
+            
+//Coordinates for University of Southern California, University of Los Angeles, Harvey Mudd College, California Institute of technology and MIT may be shifted in the json file for better visualization. 
+
+			var spiritScale = ["#FFD700","#808080", "#dc143c","#000000","#cfb53b", "#cc5500","#000080", "#ff8f00", "#de3163", "#0000ff", "#4d4dff","#000080","#ffa500","#00b300","#000000","#321414", "#9bddff", "#b31b1b", "#fbec5d", "#808080", "#ffa500", "#99badd", "#c41e3a", "#536895", "#000000", "#0000ff", "#800000", "#800080", "#cc5500"]
+
+			circles
+				.attr("r",  function (uni) {
+					// size based on number of restaurants near it
+					return rScale(uni.restaurants.length);
+				})
+				.attr("cx", function (uni) {
+					return projection([uni.longitude, uni.latitude])[0];
+				})
+				.attr("cy", function (uni) {
+					return projection([uni.longitude, uni.latitude])[1];
+				})
+				.attr("fill", function (uni) {
+          // color is based on school color / "spirit color"
+					return spiritScale[universities.indexOf(uni)];
+				})
+        .attr("opacity", .5)
+        .on("mouseover", function (d){
+          d3.select(this).attr("opacity", 1)
+          svg.selectAll("text").remove();
+          svg.append("text")
+          	.attr("x", (width/2))
+          	.attr("y", 35)
+          	.text(d.university)
+          	.style("font-weight", 500)
+          	.attr("text-anchor", "middle");        
+        })
+        .on("mouseout", function (d){
+          d3.select(this).attr("opacity", .5)
+          svg.selectAll("text").remove();
+          svg.append("text")
+	          .attr("x", (width/2))
+	          .attr("y", 35)
+	          .text("Click a Circle to Select a University")
+	          .style("font-weight", 500)
+	          .attr("text-anchor", "middle");
+        })
+				.on("click", function (uni) {
+					displayCategoryInfo(uni, selectedCategory, selectedRating);
+					// draw pie chart and update unviersity info div
+					generatePieChart(uni);
+					generateOuterRing(getRatingsCounts(uni), uni);
+				});
+            
+        svg.append("text")
+	        .attr("x", (width/2))
+	        .attr("y", 35).text("Click a Circle to Select a University")
+	        .style("font-weight", 500)
+	        .attr("text-anchor", "middle");
+         
+        for(var k=0; k<universities.length; k++){
+        	statePaths.append("text")
+            .attr("x", projection([universities[k].longitude, universities[k].latitude])[0])
+            .attr("y", projection([universities[k].longitude, universities[k].latitude])[1])
+            .text("");         
+        }
+
+		});
+	});	
+});
+</script>
+
+</body>
+</html>
